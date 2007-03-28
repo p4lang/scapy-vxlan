@@ -21,6 +21,7 @@
 
 
 from __future__ import generators
+import os
 
 BASE_VERSION = "1.0.6.1"
 
@@ -29,21 +30,17 @@ REVISION = "$Revision$"
 
 VERSION = "v%s / %s" % (BASE_VERSION, (REVISION+"--")[11:23])
 
+DEFAULT_CONFIG_FILE = os.path.join(os.environ["HOME"], ".scapy_startup.py")
+
+try:
+    os.stat(DEFAULT_CONFIG_FILE)
+except OSError:
+    DEFAULT_CONFIG_FILE = None
+
 def usage():
-    print "Usage: scapy.py [-s sessionfile]"
+    print """Usage: scapy.py [-s sessionfile] [-c new_startup_file] [-C]
+    -C: do not read startup file"""
     sys.exit(0)
-
-
-##########[XXX]#=--
-##
-#   Next things to do :
-#
-#  - fields to manage variable length hw addr (ARP, BOOTP, etc.)
-#  - improve pcap capture file support
-#  - better self-doc
-#
-##
-##########[XXX]#=--
 
 
 #############################
@@ -100,7 +97,7 @@ if __name__ == "__main__":
 ##### Module #####
 ##################
 
-import socket, sys, getopt, string, struct, random, os, code
+import socket, sys, getopt, string, struct, random, code
 import cPickle, copy, types, gzip, base64, re, zlib, array
 from sets import Set
 from select import select
@@ -210,6 +207,82 @@ if SOLARIS:
     # GRE is missing on Solaris
     socket.IPPROTO_GRE = 47
 
+###############################
+## Direct Access dictionnary ##
+###############################
+
+def fixname(x):
+    if x and x[0] in "0123456789":
+        x = "n_"+x
+    return x.translate("________________________________________________0123456789_______ABCDEFGHIJKLMNOPQRSTUVWXYZ______abcdefghijklmnopqrstuvwxyz_____________________________________________________________________________________________________________________________________")
+
+
+class DADict_Exception(Scapy_Exception):
+    pass
+
+class DADict:
+    def __init__(self, _name="DADict", **kargs):
+        self._name=_name
+        self.__dict__.update(kargs)
+    def fixname(self,val):
+        return fixname(val)
+    def __contains__(self, val):
+        return val in self.__dict__
+    def __getitem__(self, attr):
+        return getattr(self, attr)
+    def __setitem__(self, attr, val):        
+        return setattr(self, self.fixname(attr), val)
+    def __iter__(self):
+        return iter(map(lambda (x,y):y,filter(lambda (x,y):x[0]!="_", self.__dict__.items())))
+    def _show(self):
+        for k in self.__dict__.keys():
+            if k[0] != "_":
+                print "%10s = %r" % (k,getattr(self,k))
+    def __repr__(self):
+        return "<%s/ %s>" % (self._name," ".join(filter(lambda x:x[0]!="_",self.__dict__.keys())))
+
+    def _branch(self, br, uniq=0):
+        if uniq and br._name in self:
+            raise DADict_Exception("DADict: [%s] already branched in [%s]" % (br._name, self._name))
+        self[br._name] = br
+
+    def _my_find(self, *args, **kargs):
+        if args and self._name not in args:
+            return False
+        for k in kargs:
+            if k not in self or self[k] != kargs[k]:
+                return False
+        return True
+    
+    def _find(self, *args, **kargs):
+         return self._recurs_find((), *args, **kargs)
+    def _recurs_find(self, path, *args, **kargs):
+        if self in path:
+            return None
+        if self._my_find(*args, **kargs):
+            return self
+        for o in self:
+            if isinstance(o, DADict):
+                p = o._recurs_find(path+(self,), *args, **kargs)
+                if p is not None:
+                    return p
+        return None
+    def _find_all(self, *args, **kargs):
+        return self._recurs_find_all((), *args, **kargs)
+    def _recurs_find_all(self, path, *args, **kargs):
+        r = []
+        if self in path:
+            return r
+        if self._my_find(*args, **kargs):
+            r.append(self)
+        for o in self:
+            if isinstance(o, DADict):
+                p = o._recurs_find_all(path+(self,), *args, **kargs)
+                r += p
+        return r
+    def keys(self):
+        return filter(lambda x:x[0]!="_", self.__dict__.keys())
+        
 
 
 ############
@@ -285,62 +358,113 @@ MTU = 1600
 
  
 # file parsing to get some values :
-spaces = re.compile("[ \t]+|\n")
 
-IP_PROTOS={}
-try:
-    f=open("/etc/protocols")
-    for l in f:
-        try:
-            if l[0] in ["#","\n"]:
-                continue
-            lt = tuple(re.split(spaces, l))
-            if len(lt) < 3:
-                continue
-            IP_PROTOS.update({lt[2]:int(lt[1])})
-        except:
-            log_loading.info("Couldn't parse one line from protocols file (" + l + ")")
-    f.close()
-except IOError:
-    log_loading.info("Can't open /etc/protocols file")
+def load_protocols(filename):
+    spaces = re.compile("[ \t]+|\n")
+    dct = DADict(_name=filename)
+    try:
+        for l in open(filename):
+            try:
+                if l[0] in ["#","\n"]:
+                    continue
+                lt = tuple(re.split(spaces, l))
+                if len(lt) < 3:
+                    continue
+                dct[lt[2]] = int(lt[1])
+            except Exception,e:
+                log_loading.info("Couldn't parse one line from /etc/protocols file [%r] (%s)" % (l,e))
+        f.close()
+    except IOError:
+        log_loading.info("Can't open /etc/protocols file")
+    return dct
 
-ETHER_TYPES={}
-try:
-    f=open("/etc/ethertypes")
-    for l in f:
-        try:
-            if l[0] in ["#","\n"]:
-                continue
-            lt = tuple(re.split(spaces, l))
-            if len(lt) < 2:
-                continue
-            ETHER_TYPES.update({lt[0]:int(lt[1], 16)})
-        except:
-            log_loading.info("Couldn't parse one line from ethertypes file (" + l + ")")
-    f.close()
-except IOError,msg:
-    log_loading.info("Can't open /etc/ethertypes file")
- 
-TCP_SERVICES={}
-UDP_SERVICES={}
-try:
-    f=open("/etc/services")
-    for l in f:
-        try:
-            if l[0] in ["#","\n"]:
-                continue
-            lt = tuple(re.split(spaces, l))
-            if len(lt) < 2:
-                continue
-            if lt[1].endswith("/tcp"):
-                TCP_SERVICES.update({lt[0]:int(lt[1].split('/')[0])})
-            elif lt[1].endswith("/udp"):
-                UDP_SERVICES.update({lt[0]:int(lt[1].split('/')[0])})
-        except:
-            log_loading.warning("Couldn't parse one line from /etc/services file (" + l + ")")
-    f.close()
-except IOError:
-    log_loading.info("Can't open /etc/services file")
+IP_PROTOS=load_protocols("/etc/protocols")
+
+def load_ethertypes(filename):
+    spaces = re.compile("[ \t]+|\n")
+    dct = DADict(_name=filename)
+    try:
+        f=open(filename)
+        for l in f:
+            try:
+                if l[0] in ["#","\n"]:
+                    continue
+                lt = tuple(re.split(spaces, l))
+                if len(lt) < 2:
+                    continue
+                dct[lt[0]] = int(lt[1], 16)
+            except Exception,e:
+                log_loading.info("Couldn't parse one line from /etc/ethertypes file [%r] (%s)" % (l,e))
+        f.close()
+    except IOError,msg:
+        pass
+    return dct
+
+ETHER_TYPES=load_ethertypes("/etc/ethertypes")
+
+def load_services(filename):
+    spaces = re.compile("[ \t]+|\n")
+    tdct=DADict(_name="%s-tcp"%filename)
+    udct=DADict(_name="%s-udp"%filename)
+    try:
+        f=open(filename)
+        for l in f:
+            try:
+                if l[0] in ["#","\n"]:
+                    continue
+                lt = tuple(re.split(spaces, l))
+                if len(lt) < 2:
+                    continue
+                if lt[1].endswith("/tcp"):
+                    tdct[lt[0]] = int(lt[1].split('/')[0])
+                elif lt[1].endswith("/udp"):
+                    udct[lt[0]] = int(lt[1].split('/')[0])
+            except Exception,e:
+                log_loading.warning("Couldn't parse one line from /etc/services file [%r] (%s)" % (l,e))
+        f.close()
+    except IOError:
+        log_loading.info("Can't open /etc/services file")
+    return tdct,udct
+
+TCP_SERVICES,UDP_SERVICES=load_services("/etc/services")
+
+class ManufDA(DADict):
+    def fixname(self, val):
+        return val
+    def _get_manuf_couple(self, mac):
+        oui = ":".join(mac.split(":")[:3]).upper()
+        return self.__dict__.get(oui,(mac,mac))
+    def _get_manuf(self, mac):
+        return self._get_manuf_couple(mac)[1]
+    def _get_short_manuf(self, mac):
+        return self._get_manuf_couple(mac)[0]
+        
+        
+
+def load_manuf(filename):
+    try:
+        manufdb=ManufDA(_name=filename)
+        for l in open(filename):
+            try:
+                l = l.strip()
+                if not l or l.startswith("#"):
+                    continue
+                oui,shrt=l.split()[:2]
+                i = l.find("#")
+                if i < 0:
+                    lng=shrt
+                else:
+                    lng = l[i+2:]
+                manufdb[oui] = shrt,lng
+            except Exception,e:
+                log_loadding.warning("Couldn't parse one line from [%s] [%r] (%s)" % (filename, l, e))
+    except IOError:
+        #log_loading.warning("Couldn't open [%s] file" % filename)
+        pass
+    return manufdb
+    
+MANUFDB = load_manuf("/usr/share/wireshark/wireshark/manuf")
+
 
 
 
@@ -615,6 +739,8 @@ def incremental_label(label="tag%05i", start=0):
     while True:
         yield label % start
         start += 1
+
+
 
 
 ##############################
@@ -2381,8 +2507,10 @@ class Field:
         return self.name == other
     def __hash__(self):
         return hash(self.name)
-    def __repr__(self):
+    def __str__(self):
         return self.name
+    def __repr__(self):
+        return "<Field %s>" % self.name
     def copy(self):
         return copy.deepcopy(self)
     def randval(self):
@@ -2586,6 +2714,16 @@ class IPField(Field):
         elif type(x) is list:
             x = map(Net, x)
         return x
+    def resolve(self, x):
+        if self in conf.resolve:
+            try:
+                ret = socket.gethostbyaddr(x)[0]
+            except socket.herror:
+                pass
+            else:
+                if ret:
+                    return ret
+        return x
     def i2m(self, pkt, x):
         return inet_aton(x)
     def m2i(self, pkt, x):
@@ -2593,7 +2731,7 @@ class IPField(Field):
     def any2i(self, pkt, x):
         return self.h2i(pkt,x)
     def i2repr(self, pkt, x):
-        return self.i2h(pkt, x)
+        return self.resolve(self.i2h(pkt, x))
     def randval(self):
         return RandIP()
 
@@ -3106,7 +3244,9 @@ class EnumField(Field):
             x = self.s2i[x]
         return x
     def i2repr_one(self, pkt, x):
-        return self.i2s.get(x, repr(x))
+        if self not in conf.noenum and x in self.i2s:
+            return self.i2s[x]
+        return repr(x)
     
     def any2i(self, pkt, x):
         if type(x) is list:
@@ -3161,7 +3301,9 @@ class LEIntEnumField(EnumField):
 
 class XShortEnumField(ShortEnumField):
     def i2repr_one(self, pkt, x):
-        return self.i2s.get(x, lhex(x))            
+        if self not in conf.noenum and x in self.i2s:
+            return self.i2s[x]
+        return lhex(x)
 
 # Little endian long field
 class LELongField(Field):
@@ -3558,8 +3700,42 @@ class Dot11SCField(LEShortField):
 ## Packet abstract class ##
 ###########################
 
+class Packet_metaclass(type):
+    def __getattr__(self, attr):
+        for k in self.fields_desc:
+            if k.name == attr:
+                return k
+
+class NewDefaultValues(Packet_metaclass):
+    """NewDefaultValues metaclass. Example usage:
+    class MyPacket(Packet):
+        fields_desc = [ StrField("my_field", "my default value"),  ]
+        
+    class MyPacket_variant(MyPacket):
+        __metaclass__ = NewDefaultValues
+        my_field = "my new default value"
+    """    
+    def __new__(cls, name, bases, dct):
+        fields = None
+        for b in bases:
+            if hasattr(b,"fields_desc"):
+                fields = b.fields_desc[:]
+                break
+        if fields is None:
+            raise Scapy_Exception("No fields_desc in superclasses")
+
+        new_fields = []
+        for f in fields:
+            if f in dct:
+                f = f.copy()
+                f.default = dct[f]
+                del(dct[f])
+            new_fields.append(f)
+        dct["fields_desc"] = new_fields
+        return super(NewDefaultValues, cls).__new__(cls, name, bases, dct)
 
 class Packet(Gen):
+    __metaclass__ = Packet_metaclass
     name=None
 
     fields_desc = []
@@ -4511,49 +4687,6 @@ class NoPayload(Packet,object):
 ## packet classes ##
 ####################
     
-    
-class ChangeDefaultValues(type):
-    def __new__(cls, name, bases, dct):
-        default = dct["new_default_values"]
-        fields = None
-        for b in bases:
-            if hasattr(b,"fields_desc"):
-                fields = b.fields_desc[:]
-                break
-        if fields is None:
-            raise Scapy_Exception("No fields_desc in superclasses")
-
-        del(dct["new_default_values"])
-        new_fields = []
-        for f in fields:
-            if f in default:
-                f = f.copy()
-                f.default = default[f]
-            new_fields.append(f)
-        dct["fields_desc"] = new_fields
-        return super(ChangeDefaultValues, cls).__new__(cls, name, bases, dct)
-
-# Metaclass
-class NewDefaultValues(type):
-    def __new__(cls, name, bases, dct):
-        fields = None
-        for b in bases:
-            if hasattr(b,"fields_desc"):
-                fields = b.fields_desc[:]
-                break
-        if fields is None:
-            raise Scapy_Exception("No fields_desc in superclasses")
-
-        new_fields = []
-        for f in fields:
-            if f in dct:
-                f = f.copy()
-                f.default = dct[f]
-                del(dct[f])
-            new_fields.append(f)
-        dct["fields_desc"] = new_fields
-        return super(NewDefaultValues, cls).__new__(cls, name, bases, dct)
-
             
 class Raw(Packet):
     name = "Raw"
@@ -10351,9 +10484,6 @@ class ConfClass:
             if i[0] != "_":
                 s += "%-10s = %s\n" % (i, repr(getattr(self, i)))
         return s[:-1]
-    def reset(self):
-        self.__dict__ = {}
-
     
 class ProgPath(ConfClass):
     pdfreader = "acroread"
@@ -10364,6 +10494,22 @@ class ProgPath(ConfClass):
     hexedit = "hexer"
     wireshark = "wireshark"
     
+class Resolve:
+    def __init__(self):
+        self.fields = {}
+    def add(self, *flds):
+        for fld in flds:
+            self.fields[fld]=None
+    def remove(self, *flds):
+        for fld in flds:
+            if fld in self.fields:
+                del(self.fields[fld])
+    def __contains__(self, elt):
+        return elt in self.fields
+    def __repr__(self):
+        return "<Resolve [%s]>" %  " ".join(str(x) for x in self.fields)
+    
+        
 
 
 class Conf(ConfClass):
@@ -10386,6 +10532,8 @@ except_filter : BPF filter for packets to ignore
 debug_match : when 1, store received packet that are not matched into debug.recv
 route    : holds the Scapy routing table and provides methods to manipulate it
 warning_threshold : how much time between warnings from the same place
+resolve   : holds list of fields for which resolution should be done
+noenum    : holds list of enum fields for which conversion to string should NOT be done
 AS_resolver: choose the AS resolver class to use
 """
     session = ""  
@@ -10420,6 +10568,13 @@ AS_resolver: choose the AS resolver class to use
     color_theme = DefaultTheme()
     warning_threshold = 5
     prog = ProgPath()
+    resolve = Resolve()
+    noenum = Resolve()
+    ethertypes = ETHER_TYPES
+    protocols = IP_PROTOS
+    services_tcp = TCP_SERVICES
+    services_udp = UDP_SERVICES
+    manufdb = MANUFDB
     AS_resolver = AS_resolver_multi() 
         
 
@@ -10622,7 +10777,7 @@ def interact(mydict=None,argv=None,mybanner=None,loglevel=1):
                     object = eval(expr)
                 except:
                     object = eval(expr, session)
-                if isinstance(object, Packet):
+                if isinstance(object, Packet) or isinstance(object, Packet_metaclass):
                     words = filter(lambda x: x[0]!="_",dir(object))
                     words += map(str, object.fields_desc)
                 else:
@@ -10643,25 +10798,33 @@ def interact(mydict=None,argv=None,mybanner=None,loglevel=1):
     
     session=None
     session_name=""
+    CONFIG_FILE = DEFAULT_CONFIG_FILE
 
-    opts=getopt.getopt(argv[1:], "hs:")
     iface = None
     try:
+        opts=getopt.getopt(argv[1:], "hs:Cc:")
         for opt, parm in opts[0]:
             if opt == "-h":
                 usage()
             elif opt == "-s":
                 session_name = parm
+            elif opt == "-c":
+                CONFIG_FILE = parm
+            elif opt == "-C":
+                CONFIG_FILE = None
         
         if len(opts[1]) > 0:
             raise getopt.GetoptError("Too many parameters : [%s]" % string.join(opts[1]),None)
 
 
-    except getopt.error, msg:
+    except getopt.GetoptError, msg:
         log_loading.error(msg)
         sys.exit(1)
 
 
+    if CONFIG_FILE:
+        read_config_file(CONFIG_FILE)
+        
     if session_name:
         try:
             os.stat(session_name)
@@ -10709,5 +10872,17 @@ def interact(mydict=None,argv=None,mybanner=None,loglevel=1):
     
     sys.exit()
 
+
+def read_config_file(configfile):
+    try:
+        execfile(configfile)
+    except IOError,e:
+        log_loading.warning("Cannot read config file [%s] [%s]" % (configfile,e))
+    except Exception,e:
+        log_loading.exception("Error during evaluation of config file [%s]" % configfile)
+        
+
 if __name__ == "__main__":
     interact()
+else:
+    read_config_file(DEFAULT_CONFIG_FILE)
