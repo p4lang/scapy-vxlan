@@ -988,7 +988,9 @@ class Route:
         self.routes.append((the_net,the_msk,'0.0.0.0',iff,the_addr))
 
 
-    def route(self,dst):
+    def route(self,dst,verbose=None):
+        if verbose is None:
+            verbose=conf.verb
         # Transform "192.168.*.1-5" to one IP of the set
         dst = dst.split("/")[0]
         dst = dst.replace("*","0") 
@@ -1013,7 +1015,8 @@ class Route:
             if (dst & m) == (d & m):
                 pathes.append((m,(i,a,gw)))
         if not pathes:
-            warning("No route found (no default route?)")
+            if verbose:
+                warning("No route found (no default route?)")
             return "lo","0.0.0.0","0.0.0.0" #XXX linux specific!
         # Choose the more specific route (greatest netmask).
         # XXX: we don't care about metrics
@@ -1219,7 +1222,7 @@ else:
             ifaddr = inet_ntoa(ifreq[20:24])
             routes.append((dst, msk, "0.0.0.0", "lo", ifaddr))
         else:
-            warning("Interface lo: unkownn address family (%i)"% addrfamily)
+            warning("Interface lo: unkown address family (%i)"% addrfamily)
     
         for l in f.readlines()[1:]:
             iff,dst,gw,flags,x,x,x,msk,x,x,x = l.split()
@@ -1228,13 +1231,17 @@ else:
                 continue
             if flags & RTF_REJECT:
                 continue
-            ifreq = ioctl(s, SIOCGIFADDR,struct.pack("16s16x",iff))
-            addrfamily = struct.unpack("h",ifreq[16:18])[0]
-            if addrfamily == socket.AF_INET:
-                ifaddr = inet_ntoa(ifreq[20:24])
+            try:
+                ifreq = ioctl(s, SIOCGIFADDR,struct.pack("16s16x",iff))
+            except IOError: # interface is present in routing tables but does not have any assigned IP
+                ifaddr="0.0.0.0"
             else:
-                warning("Interface %s: unkownn address family (%i)"%(iff, addrfamily))
-                continue
+                addrfamily = struct.unpack("h",ifreq[16:18])[0]
+                if addrfamily == socket.AF_INET:
+                    ifaddr = inet_ntoa(ifreq[20:24])
+                else:
+                    warning("Interface %s: unkown address family (%i)"%(iff, addrfamily))
+                    continue
             routes.append((long(dst,16),
                           long(msk,16),
                           inet_ntoa(struct.pack("I",long(gw,16))),
@@ -2022,6 +2029,8 @@ class BERcodec_NULL(BERcodec_INTEGER):
     def enc(cls, i):
         if i == 0:
             return chr(cls.tag)+"\0"
+        else:
+            return super(cls,cls).enc(i)
 
 class BERcodec_STRING(BERcodec_Object):
     tag = ASN1_Class_UNIVERSAL.STRING
@@ -3365,16 +3374,11 @@ class ActionField:
 
 
 class ConditionalField:
-    def __init__(self, fld, fldlst, cond):
+    def __init__(self, fld, cond):
         self.fld = fld
-        self.fldlst = fldlst
         self.cond = cond
     def _evalcond(self,pkt):
-        if type(self.fldlst) is list or type(self.fldlst) is tuple:
-            res = map(lambda x,pkt=pkt:getattr(pkt,x), self.fldlst)
-        else:
-            res = getattr(pkt, self.fldlst)
-        return self.cond(res)
+        return self.cond(pkt)
         
     def getfield(self, pkt, s):
         if self._evalcond(pkt):
@@ -3530,7 +3534,7 @@ class IPField(Field):
             except socket.error:
                 x = Net(x)
         elif type(x) is list:
-            x = map(Net, x)
+            x = [self.h2i(pkt, n) for n in x] 
         return x
     def resolve(self, x):
         if self in conf.resolve:
@@ -3985,7 +3989,15 @@ class BCDFloatField(Field):
 class BitField(Field):
     def __init__(self, name, default, size):
         Field.__init__(self, name, default)
-        self.size = size
+        self.rev = size < 0 
+        self.size = abs(size)
+    def reverse(self, val):
+        if self.size == 16:
+            val = socket.ntohs(val)
+        elif self.size == 32:
+            val = socket.ntohl(val)
+        return val
+        
     def addfield(self, pkt, s, val):
         if val is None:
             val = 0
@@ -3994,6 +4006,8 @@ class BitField(Field):
         else:
             bitsdone = 0
             v = 0
+        if self.rev:
+            val = self.reverse(val)
         v <<= self.size
         v |= val & ((1L<<self.size) - 1)
         bitsdone += self.size
@@ -4026,6 +4040,9 @@ class BitField(Field):
 
         # remove low order bits
         b = b >> (nb_bytes*8 - self.size - bn)
+
+        if self.rev:
+            b = self.reverse(b)
 
         bn += self.size
         s = s[bn/8:]
@@ -4090,7 +4107,8 @@ class CharEnumField(EnumField):
 class BitEnumField(BitField,EnumField):
     def __init__(self, name, default, size, enum):
         EnumField.__init__(self, name, default, enum)
-        self.size = size
+        self.rev = size < 0
+        self.size = abs(size)
     def any2i(self, pkt, x):
         return EnumField.any2i(self, pkt, x)
     def i2repr(self, pkt, x):
@@ -4258,7 +4276,7 @@ class TCPOptionsField(StrField):
                     ofmt = TCPOptions[0][onum][1]
                     if onum == 5: #SAck
                         ofmt += "%iI" % len(oval)
-                    if ofmt is not None:
+                    if ofmt is not None and (type(oval) is not str or "s" in ofmt):
                         if type(oval) is not tuple:
                             oval = (oval,)
                         oval = struct.pack(ofmt, *oval)
@@ -5886,6 +5904,20 @@ class Dot1Q(Packet):
         else:
             return self.sprintf("802.1q (%Dot1Q.type%) vlan %Dot1Q.vlan%")
 
+            
+
+
+class RadioTap(Packet):
+    name = "RadioTap dummy"
+    fields_desc = [ ByteField('version', 0),
+                    ByteField('pad', 0),
+                    FieldLenField('len', None, 'notdecoded', '@H'),
+                    FlagsField('present', None, -32, ['TSFT','Flags','Rate','Channel','FHSS','dBm_AntSignal',
+                                                     'dBm_AntNoise','Lock_Quality','TX_Attenuation','dB_TX_Attenuation',
+                                                      'dBm_TX_Power', 'Antenna', 'dB_AntSignal', 'dB_AntNoise',
+                                                     'b14', 'b15','b16','b17','b18','b19','b20','b21','b22','b23',
+                                                     'b24','b25','b26','b27','b28','b29','b30','Ext']),
+                    StrLenField('notdecoded', "", 'len', shift=8) ]
 
 class STP(Packet):
     name = "Spanning Tree Protocol"
@@ -5936,7 +5968,7 @@ class EAP(Packet):
     fields_desc = [ ByteEnumField("code", 4, {1:"REQUEST",2:"RESPONSE",3:"SUCCESS",4:"FAILURE"}),
                     ByteField("id", 0),
                     ShortField("len",None),
-                    ConditionalField(ByteEnumField("type",0, {1:"ID",4:"MD5"}), "code", lambda x:x not in [EAP.SUCCESS, EAP.FAILURE])
+                    ConditionalField(ByteEnumField("type",0, {1:"ID",4:"MD5"}), lambda pkt:pkt.code not in [EAP.SUCCESS, EAP.FAILURE])
 
                                      ]
     
@@ -6529,7 +6561,7 @@ for k,v in DHCPOptions.iteritems():
         n = v
         v = None
     else:
-        n = str(v)
+        n = v.name
     DHCPRevOptions[n] = (k,v)
 del(n)
 del(v)
@@ -6653,7 +6685,7 @@ class Dot11(Packet):
     def answers(self, other):
         if isinstance(other,Dot11):
             if self.type == 0: # management
-                if self.addr1 != other.addr2: # check resp DA w/ req SA
+                if self.addr1.lower() != other.addr2.lower(): # check resp DA w/ req SA
                     return 0
                 if (other.subtype,self.subtype) in [(0,1),(2,3),(4,5)]:
                     return 1
@@ -6860,6 +6892,11 @@ class PrismHeader(Packet):
                   LEShortField("frmlen_len",0),
                     LEIntField("frmlen",0),
                     ]
+    def answers(self, other):
+        if isinstance(other, PrismHeader):
+            return self.payload.answers(other.payload)
+        else:
+            return self.payload.answers(other)
 
 
 
@@ -6923,8 +6960,8 @@ class GRE(Packet):
                     BitField("reserved0",0,12),
                     BitField("version",0,3),
                     XShortEnumField("proto", 0x0000, ETHER_TYPES),
-                    ConditionalField(XShortField("chksum",None),"chksumpresent",lambda x:x==1),
-                    ConditionalField(XShortField("reserved1",None),"chksumpresent",lambda x:x==1),
+                    ConditionalField(XShortField("chksum",None),lambda pkt:pkt.chksumpresent==1),
+                    ConditionalField(XShortField("reserved1",None),lambda pkt:pkt.chksumpresent==1),
                     ]
     def post_build(self, p, pay):
         p += pay
@@ -8494,6 +8531,7 @@ def split_layers(lower, upper, __fval=None, **fval):
 layer_bonds = [ ( Dot3,   LLC,      { } ),
                 ( GPRS,   IP,       { } ),
                 ( PrismHeader, Dot11, { }),
+                ( RadioTap,    Dot11, { }),
                 ( Dot11,  LLC,      { "type" : 2 } ),
                 ( PPP,    IP,       { "proto" : 0x0021 } ),
                 ( Ether,  LLC,      { "type" : 0x007a } ),
@@ -8763,9 +8801,11 @@ LLTypes = { ARPHDR_ETHER : Ether_Dot3_Dispatcher,
             101 : IP,
             801 : Dot11,
             802 : PrismHeader,
+            803 : RadioTap,
             105 : Dot11,
             113 : CookedLinux,
             119 : PrismHeader, # for atheros
+            127 : RadioTap,
             144 : CookedLinux, # called LINUX_IRDA, similar to CookedLinux
             783 : IrLAPHead,
             0xB1E70073L : HCI_Hdr, # I invented this one
@@ -8776,6 +8816,8 @@ LLNumTypes = { Ether : ARPHDR_ETHER,
                IP  : 101,
                Dot11  : 801,
                PrismHeader : 802,
+               RadioTap    : 803,
+               RadioTap    : 127,
                Dot11 : 105,
                CookedLinux : 113,
                CookedLinux : 144,
@@ -9485,6 +9527,43 @@ send(packets, [inter=0], [loop=0], [verbose=conf.verb]) -> None"""
     if iface is None and iface_hint is not None:
         iface = conf.route.route(iface_hint)[0]
     __gen_send(conf.L2socket(iface=iface, *args, **kargs), x, inter=inter, loop=loop, count=count, verbose=verbose)
+
+def sendpfast(x, pps=None, mbps=None, realtime=None, loop=0, iface=None):
+    """Send packets at layer 2 using tcpreplay for performance
+    pps:  packets per second
+    mpbs: MBits per second
+    realtime: use packet's timestamp, bending time with realtime value
+    loop: number of times to process the packet list
+    iface: output interface """
+    if iface is None:
+        iface = conf.iface
+    options = ["--intf1=%s" % iface ]
+    if pps is not None:
+        options.append("--pps=%i" % pps)
+    elif mbps is not None:
+        options.append("--mbps=%i" % mbps)
+    elif realtime is not None:
+        options.append("--multiplier=%i" % realtime)
+    else:
+        options.append("--topspeed")
+
+    if loop:
+        options.append("--loop=%i" % loop)
+
+    f = os.tempnam("scapy")
+    options.append(f)
+    wrpcap(f, x)
+    try:
+        try:
+            os.spawnlp(os.P_WAIT, conf.prog.tcpreplay, conf.prog.tcpreplay, *options)
+        except KeyboardInterrupt:
+            log_interactive.info("Interrupted by user")
+    finally:
+        os.unlink(f)
+
+        
+
+        
     
 def sr(x,filter=None, iface=None, nofilter=0, *args,**kargs):
     """Send and receive packets at layer 3
@@ -11802,6 +11881,7 @@ class ProgPath(ConfClass):
     dot = "dot"
     display = "display"
     tcpdump = "tcpdump"
+    tcpreplay = "tcpreplay"
     hexedit = "hexer"
     wireshark = "wireshark"
     
@@ -11894,6 +11974,11 @@ AS_resolver: choose the AS resolver class to use
         
 
 conf=Conf()
+
+betteriface = conf.route.route("0.0.0.0", verbose=0)[0]
+if betteriface != "lo": #XXX linux specific...
+    conf.iface = betteriface
+del(betteriface)
 
 if PCAP:
     conf.L2listen=L2pcapListenSocket
