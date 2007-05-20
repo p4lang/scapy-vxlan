@@ -103,6 +103,7 @@ from sets import Set
 from select import select
 from glob import glob
 from fcntl import ioctl
+import itertools
 import fcntl
 import warnings
 warnings.filterwarnings("ignore","tempnam",RuntimeWarning, __name__)
@@ -680,15 +681,13 @@ crc32 = zlib.crc32
 
 
 def checksum(pkt):
-    pkt=str(pkt)
-    s=0
     if len(pkt) % 2 == 1:
         pkt += "\0"
-    for i in range(len(pkt)/2):
-        s = s +  (struct.unpack("!H",pkt[2*i:2*i+2])[0])
+    s = sum(array.array("H", pkt))
     s = (s >> 16) + (s & 0xffff)
     s += s >> 16
-    return  ~s & 0xffff
+    s = ~s
+    return (((s>>8)&0xff)|s<<8) & 0xffff
 
 def warning(x):
     log_runtime.warning(x)
@@ -903,8 +902,13 @@ class Route:
     def __init__(self):
         self.resync()
         self.s=socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.cache = {}
+
+    def invalidate_cache(self):
+        self.cache = {}
 
     def resync(self):
+        self.invalidate_cache()
         self.routes = read_routes()
 
     def __repr__(self):
@@ -941,11 +945,13 @@ class Route:
         """Ex:
         add(net="192.168.1.0/24",gw="1.2.3.4")
         """
+        self.invalidate_cache()
         self.routes.append(self.make_route(*args,**kargs))
 
         
     def delt(self,  *args, **kargs):
         """delt(host|net, gw|dev)"""
+        self.invalidate_cache()
         route = self.make_route(*args,**kargs)
         try:
             i=self.routes.index(route)
@@ -954,6 +960,7 @@ class Route:
             warning("no matching route found")
              
     def ifchange(self, iff, addr):
+        self.invalidate_cache()
         the_addr,the_msk = (addr.split("/")+["32"])[:2]
         the_msk = itom(int(the_msk))
         the_rawaddr, = struct.unpack("I",inet_aton(the_addr))
@@ -974,6 +981,7 @@ class Route:
                 
 
     def ifdel(self, iff):
+        self.invalidate_cache()
         new_routes=[]
         for rt in self.routes:
             if rt[3] != iff:
@@ -981,6 +989,7 @@ class Route:
         self.routes=new_routes
         
     def ifadd(self, iff, addr):
+        self.invalidate_cache()
         the_addr,the_msk = (addr.split("/")+["32"])[:2]
         the_msk = itom(int(the_msk))
         the_rawaddr, = struct.unpack("I",inet_aton(the_addr))
@@ -988,11 +997,13 @@ class Route:
         self.routes.append((the_net,the_msk,'0.0.0.0',iff,the_addr))
 
 
-    def route(self,dst,verbose=None):
+    def route(self,dest,verbose=None):
+        if dest in self.cache:
+            return self.cache[dest]
         if verbose is None:
             verbose=conf.verb
         # Transform "192.168.*.1-5" to one IP of the set
-        dst = dst.split("/")[0]
+        dst = dest.split("/")[0]
         dst = dst.replace("*","0") 
         while 1:
             l = dst.find("-")
@@ -1021,7 +1032,9 @@ class Route:
         # Choose the more specific route (greatest netmask).
         # XXX: we don't care about metrics
         pathes.sort()
-        return pathes[-1][1] 
+        ret = pathes[-1][1]
+        self.cache[dest] = ret
+        return ret
             
     def get_if_bcast(self, iff):
         for net, msk, gw, iface, addr in self.routes:
@@ -3540,7 +3553,7 @@ class IPField(Field):
         if self in conf.resolve:
             try:
                 ret = socket.gethostbyaddr(x)[0]
-            except socket.herror:
+            except:
                 pass
             else:
                 if ret:
@@ -4828,6 +4841,7 @@ class Packet(Gen):
     payload_guess = []
     initialized = 0
     show_indent=1
+    explicit = 0
 
     def from_hexcap(cls):
         return cls(import_hexcap())
@@ -4919,21 +4933,28 @@ class Packet(Gen):
         clone.overloaded_fields = self.overloaded_fields.copy()
         clone.overload_fields = self.overload_fields.copy()
         clone.underlayer=self.underlayer
+        clone.explicit=self.explicit
         clone.post_transforms=self.post_transforms[:]
         clone.__dict__["payload"] = self.payload.copy()
         clone.payload.add_underlayer(clone)
         return clone
 
     def getfieldval(self, attr):
-        for f in self.fields, self.overloaded_fields, self.default_fields:
-            if f.has_key(attr):
-                return f[attr]
+        if attr in self.fields:
+            return self.fields[attr]
+        if attr in self.overloaded_fields:
+            return self.overloaded_fields[attr]
+        if attr in self.default_fields:
+            return self.default_fields[attr]
         return self.payload.getfieldval(attr)
     
     def getfield_and_val(self, attr):
-        for f in self.fields, self.overloaded_fields, self.default_fields:
-            if f.has_key(attr):
-                return self.get_field(attr),f[attr]
+        if attr in self.fields:
+            return self.get_field(attr),self.fields[attr]
+        if attr in self.overloaded_fields:
+            return self.get_field(attr),self.overloaded_fields[attr]
+        if attr in self.default_fields:
+            return self.get_field(attr),self.default_fields[attr]
         return self.payload.getfield_and_val(attr)
     
     def __getattr__(self, attr):
@@ -4953,6 +4974,7 @@ class Packet(Gen):
                 else:
                     any2i = fld.any2i
                 self.fields[attr] = any2i(self, val)
+                self.explicit=0
             elif attr == "payload":
                 self.remove_payload()
                 self.add_payload(val)
@@ -4964,6 +4986,7 @@ class Packet(Gen):
         if self.initialized:
             if self.fields.has_key(attr):
                 del(self.fields[attr])
+                self.explicit=0 # in case a default value must be explicited
                 return
             elif self.default_fields.has_key(attr):
                 return
@@ -5003,7 +5026,7 @@ class Packet(Gen):
                                   repr(self.payload),
                                   ct.punct(">"))
     def __str__(self):
-        return self.__iter__().next().build()
+        return self.build()
     def __div__(self, other):
         if isinstance(other, Packet):
             cloneA = self.copy()
@@ -5045,6 +5068,8 @@ class Packet(Gen):
         return self.payload.build(internal=1)
 
     def build(self,internal=0):
+        if not self.explicit:
+            self = self.__iter__().next()
         pkt = self.do_build()
         for t in self.post_transforms:
             pkt = t(pkt)
@@ -5365,19 +5390,25 @@ Creates an EPS file describing a packet. If filename is not provided a temporary
                         if isinstance(done2[k], VolatileValue):
                             done2[k] = done2[k]._fix()
                     pkt = self.__class__()
+                    pkt.explicit = 1
                     pkt.fields = done2
                     pkt.time = self.time
                     pkt.underlayer = self.underlayer
                     pkt.overload_fields = self.overload_fields.copy()
                     pkt.post_transforms = self.post_transforms
-                    if payl is None:
-                        yield pkt
-                    else:
-                        yield pkt/payl
-        todo = map(lambda (x,y):x, filter(lambda (x,y):isinstance(y,VolatileValue), self.default_fields.items()))
-        todo += map(lambda (x,y):x, filter(lambda (x,y):isinstance(y,VolatileValue), self.overloaded_fields.items()))
-        todo += self.fields.keys()
-        return loop(map(lambda x:str(x), todo), {})
+                    if payl is not None:
+                        pkt.add_payload(payl)
+                    yield pkt
+
+        if self.explicit:
+            todo = []
+            done = self.fields
+        else:
+            todo = [ k for (k,v) in itertools.chain(self.default_fields.iteritems(),
+                                                    self.overloaded_fields.iteritems())
+                     if isinstance(v, VolatileValue) ] + self.fields.keys()
+            done = {}
+        return loop(todo, done)
 
     def __gt__(self, other):
         """True if other is an answer from self (self ==> other)."""
