@@ -9,19 +9,21 @@ Scapy's interactive shell is run in a terminal session. Root privileges are need
 send the packets, so we're using ``sudo`` here::
   
     $ sudo scapy
-    Welcome to Scapy (2.0.0.10 beta)
+    Welcome to Scapy (2.0.1-dev)
     >>> 
 
 On Windows, please open a command prompt (``cmd.exe``) and make sure that you have 
 administrator privileges::
 
-    C:\scapy> python scapy.py
-    Welcome to Scapy (1.2.0.2-win)
-    >>> 
+    C:\scapy-win2>run_scapy
+    INFO: No IPv6 support in kernel
+    WARNING: No route found for IPv6 destination :: (no default route?)
+    Welcome to Scapy (2.0.1-dev)
+    >>>
 
 If you do not have all optional packages installed, Scapy will inform you that 
 some features will not be available:: 
-
+                                 
     INFO: Can't import python gnuplot wrapper . Won't be able to plot.
     INFO: Can't import PyX. Won't be able to use psdump() or pdfdump().
 
@@ -1487,11 +1489,15 @@ Once we obtain a reasonable number of responses we can start analyzing collected
 nmap_fp
 ^^^^^^^
 
-If you have nmap installed you can use it's active os fingerprinting database with Scapy. First make sure that version 1 of signature database is located in the path specified by::
+Nmap fingerprinting (the old "1st generation" one that was done by Nmap up to v4.20) is supported in Scapy. In Scapy v2 you have to load an extension module first::
+
+    >>> load_module("nmap")
+
+If you have Nmap installed you can use it's active os fingerprinting database with Scapy. Make sure that version 1 of signature database is located in the path specified by::
 
     >>> conf.nmap_base
 
-Scapy includes a built-in ``nmap_fp()`` function which implements same probes as in Nmap's OS Detection engine::
+Then you can use the ``nmap_fp()`` function which implements same probes as in Nmap's OS Detection engine::
 
     >>> nmap_fp("192.168.1.1",oport=443,cport=1)
     Begin emission:
