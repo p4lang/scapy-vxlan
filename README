@@ -1,0 +1,2 @@
+Barefoot modified scapy, which supports VXLAN. Waiting for VXLAN support to be
+added to the main scapy repo.
