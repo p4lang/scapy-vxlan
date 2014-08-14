@@ -6,6 +6,7 @@
 
 from scapy.packet import *
 from scapy.fields import *
+from scapy.all import * # Otherwise failing at the UDP reference below
 
 class VXLAN(Packet):
     name = "VXLAN"
