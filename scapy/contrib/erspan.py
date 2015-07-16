@@ -18,5 +18,20 @@ class ERSPAN(Packet):
                     BitField("span_id", 0, 10),
                     XIntField("unknown7", 0x00000000)]
 
-bind_layers(GRE, ERSPAN, proto=0x22eb)
+bind_layers(GRE, ERSPAN, proto=0x88be)
 bind_layers(ERSPAN, Ether)
+
+class ERSPAN_III(Packet):
+    name = "ERSPAN_III"
+    fields_desc = [ BitField("version", 2, 4),
+                    BitField("vlan", 0, 12),
+                    BitField("priority", 0, 3),
+                    BitField("unknown2", 0, 1),
+                    BitField("direction", 0, 1),
+                    BitField("truncated", 0, 1),
+                    BitField("span_id", 0, 10),
+                    XIntField("timestamp", 0x00000000),
+                    XIntField("sgt_other", 0x00000000)]
+
+bind_layers(GRE, ERSPAN_III, proto=0x22eb)
+bind_layers(ERSPAN_III, Ether)
