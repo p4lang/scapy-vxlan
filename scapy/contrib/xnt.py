@@ -34,5 +34,10 @@ class INT_META_HDR(Packet):
 bind_layers(VXLAN_GPE_INT, INT_META_HDR)
 # Add binding to GENEVE
 
-## Find way to add variable number of int_field headers, one for each bit in
-## inst_mask 
+# INT data header
+class INT_hop_info(Packet):
+    name = "INT_hop_info"
+    fields_desc = [ BitField("bos", 0, 1),
+                    XBitField("val", 0x7FFFFFFF, 31) ]
+
+bind_layers(INT_META_HDR, INT_hop_info)
