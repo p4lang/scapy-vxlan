@@ -25,7 +25,7 @@ class VXLAN_GPE(Packet):
     name = "VXLAN_GPE"
     fields_desc = [ FlagsField("flags", 0x18, 8, ['R', 'R', 'R', 'I', 'P', 'R', 'R', 'R']),
                     XShortField("reserved1", 0x0000),
-                    XByteField("next_proto", 0x01),
+                    XByteField("next_proto", 0x03),
                     ThreeBytesField("vni", 0),
                     XByteField("reserved2", 0x00)]
 
