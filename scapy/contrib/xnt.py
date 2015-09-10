@@ -10,8 +10,8 @@ from scapy.all import * # Otherwise failing at the UDP reference below
 class VXLAN_GPE_INT(Packet):
     name = "VXLAN_GPE_INT_header"
     fields_desc = [ XByteField("int_type", 0x01),
-                    XByteField("length", 0x00),
                     XByteField("rsvd", 0x00),
+                    XByteField("length", 0x00),
                     XByteField("next_proto", 0x03) ]
 
 bind_layers(VXLAN_GPE, VXLAN_GPE_INT, next_proto=5)
