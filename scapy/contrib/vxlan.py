@@ -32,5 +32,5 @@ class VXLAN_GPE(Packet):
     def mysummary(self):
         return self.sprintf("VXLAN_GPE (vni=%VXLAN_GPE.vni%)")
 
-bind_layers(UDP, VXLAN, dport=4790)
-bind_layers(VXLAN, Ether)
+bind_layers(UDP, VXLAN_GPE, dport=4790)
+bind_layers(VXLAN_GPE, Ether)
