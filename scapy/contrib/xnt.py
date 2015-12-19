@@ -27,6 +27,7 @@ class INT_META_HDR(Packet):
                     ShortField("rsvd2", 0x0000)]
 
 bind_layers(VXLAN_GPE_INT, INT_META_HDR)
+bind_layers(ERSPAN_III, INT_META_HDR)  # this for the INT report from sink
 # Add binding to GENEVE
 
 # INT data header
@@ -36,3 +37,22 @@ class INT_hop_info(Packet):
                     XBitField("val", 0x7FFFFFFF, 31) ]
 
 bind_layers(INT_META_HDR, INT_hop_info)
+
+class VXLAN_GPE_INT_PLT(Packet):
+    name = "VXLAN_GPE_INT_PLT_header"
+    fields_desc = [ XByteField("int_type", 0x03),
+                    XByteField("rsvd", 0x00),
+                    XByteField("length", 0x03),
+                    XByteField("next_proto", 0x05) ]
+
+bind_layers(VXLAN_GPE, VXLAN_GPE_INT_PLT, next_proto=5)
+
+#PLT data header
+class INT_PLT_HDR(Packet):
+    name = "INT_PLT_data_header"
+    fields_desc = [ IntField("path_encoding", 0x00000000),
+                    IntField("latency_encoding", 0x00000000) ]
+
+bind_layers(VXLAN_GPE_INT_PLT, INT_PLT_HDR)
+bind_layers(VXLAN_GPE_INT_PLT, VXLAN_GPE_INT, next_proto=5)
+
