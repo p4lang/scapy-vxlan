@@ -27,6 +27,7 @@ class INT_META_HDR(Packet):
                     ShortField("rsvd2", 0x0000)]
 
 bind_layers(VXLAN_GPE_INT, INT_META_HDR)
+bind_layers(ERSPAN_III, INT_META_HDR)  # this for the INT report from sink
 # Add binding to GENEVE
 
 # INT data header
