@@ -342,6 +342,8 @@ extensions_paths: path or list of paths where extensions are to be looked for
     L3socket = None
     L2socket = None
     L2listen = None
+    NNsocket = None
+    NNlisten = None
     histfile = os.path.join(os.path.expanduser("~"), ".scapy_history")
     padding = 1
     except_filter = ""
@@ -359,6 +361,11 @@ extensions_paths: path or list of paths where extensions are to be looked for
     emph = Emphasize()
     use_pcap = False
     use_dnet = False
+    try:
+        import nnpy
+        use_nanomsg = True
+    except ImportError:
+        use_nanomsg = False
     ipv6_enabled = socket.has_ipv6
     ethertypes = ETHER_TYPES
     protocols = IP_PROTOS

@@ -71,6 +71,8 @@ if LINUX:
     from linux import *
     if scapy.config.conf.use_pcap or scapy.config.conf.use_dnet:
         from pcapdnet import *
+    if scapy.config.conf.use_nanomsg:
+        from nanomsg import *
 elif OPENBSD or FREEBSD or NETBSD or DARWIN:
     from bsd import *
 elif SOLARIS:

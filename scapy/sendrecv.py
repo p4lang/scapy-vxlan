@@ -259,6 +259,73 @@ sendp(packets, [inter=0], [loop=0], [verbose=conf.verb]) -> None"""
     __gen_send(conf.L2socket(iface=iface, *args, **kargs), x, inter=inter, loop=loop, count=count, verbose=verbose, realtime=realtime)
 
 @conf.commands.register
+def nn_sendp(x, iface, port, inter=0, loop=0, count=None, verbose=None, realtime=None):
+    """Send packets on a nanomsg socket using packet_in protocol
+nn_sendp(packets, [inter=0], [loop=0], [verbose=conf.verb]) -> None"""
+    if iface is None:
+        return
+    __gen_send(conf.NNsocket(iface, port), x, inter=inter, loop=loop, count=count, verbose=verbose, realtime=realtime)
+
+def nn_sndrcv(x, iface, port, timeout=None, count=0, ll=None,
+              prn=None, lfilter=None, stop_filter=None):
+    """
+    x: one packet, or a list of packets to send
+    iface: the switch nanomsg interface
+    port: the port on which to send the packet(s)
+    timeout: stop sniffing after a given time (default: None)
+    count: number of packets to capture. 0 means infinity
+    ll: tell scapy how to interpret the lower layer
+         Ether means ethernet
+         None means keep the raw bytes (binary string)
+    prn: function to apply to each packet. If something is returned,
+         it is displayed. Ex:
+         ex: prn = lambda x: x.summary()
+    lfilter: python function applied to each (port, packet) to determine
+         if further action may be done
+    stop_filter: python function applied to each (port, packet) to determine
+         if we have to stop the capture after this packet
+         ex: stop_filter = lambda x: x[1].haslayer(TCP)
+    """
+    c = 0
+    s_snd = conf.NNsocket(iface, port)
+    s_rcv = conf.NNlisten(iface)
+    x = list(x)
+    for p in x:
+        s_snd.send(p)
+    lst = []
+    if timeout is not None:
+        stoptime = time.time()+timeout
+    remain = None
+    try:
+        while 1:
+            if timeout is not None:
+                remain = stoptime-time.time()
+                if remain <= 0:
+                    break
+            sel = select([s_rcv],[],[],remain)
+            if s_rcv in sel[0]:
+                received = s_rcv.recv(ll)
+                if received is None:
+                    break
+                if lfilter and not lfilter(received):
+                    continue
+                lst.append(received)
+                c += 1
+                if prn:
+                    r = prn(received)
+                    if r is not None:
+                        print r
+                if stop_filter and stop_filter(p):
+                    break
+                if count > 0 and c >= count:
+                    break
+    except KeyboardInterrupt:
+        pass
+    s_rcv.close()
+    s_snd.close()
+    return lst
+
+@conf.commands.register
 def sendpfast(x, pps=None, mbps=None, realtime=None, loop=0, file_cache=False, iface=None):
     """Send packets at layer 2 using tcpreplay for performance
     pps:  packets per second
