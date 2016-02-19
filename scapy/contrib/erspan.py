@@ -34,4 +34,4 @@ class ERSPAN_III(Packet):
                     XIntField("sgt_other", 0x00000000)]
 
 bind_layers(GRE, ERSPAN_III, proto=0x22eb)
-bind_layers(ERSPAN_III, Ether)
+bind_layers(ERSPAN_III, Ether, sgt_other=0)
