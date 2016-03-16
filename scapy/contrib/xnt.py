@@ -11,14 +11,13 @@ class VXLAN_GPE_INT_PLT(Packet):
     name = "VXLAN_GPE_INT_PLT_header"
     fields_desc = [ XByteField("int_type", 0x03),
                     XByteField("rsvd", 0x00),
-                    XByteField("length", 0x03),
+                    XByteField("length", 0x02),
                     XByteField("next_proto", 0x05) ]
 
 #PLT data header
 class INT_PLT_HDR(Packet):
     name = "INT_PLT_data_header"
-    fields_desc = [ IntField("path_encoding", 0x00000000),
-                    IntField("latency_encoding", 0x00000000) ]
+    fields_desc = [ IntField("path_latency_encoding", 0x00000000) ]
 
 bind_layers(VXLAN_GPE_INT_PLT, INT_PLT_HDR)
 
