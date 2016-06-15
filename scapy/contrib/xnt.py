@@ -43,6 +43,7 @@ class INT_META_HDR(Packet):
 bind_layers(VXLAN_GPE_INT, INT_META_HDR)
 bind_layers(ERSPAN_III, INT_META_HDR, sgt_other=0x4000)  # this for the INT upstream report from sink
 bind_layers(ERSPAN_III, INT_META_HDR, sgt_other=0x4008)  # this for the INT last-hop report from sink
+bind_layers(ERSPAN_III, INT_META_HDR, sgt_other=0x4408)  # this for the INT last-hop report from 1-hop sink, which is INT src and sink at the same time for local traffic
 # Add binding to GENEVE
 
 # INT data header
