@@ -30,10 +30,8 @@ class GENEVE(Packet):
                     return GENEVE_INT
                 elif int_type == 3:
                     return GENEVE_INT_PLT
-            else:
-                return Packet.guess_payload_class(self, payload)
-        else:
-            return Packet.guess_payload_class(self, payload)
+
+        return Packet.guess_payload_class(self, payload)
 
 bind_layers(UDP, GENEVE, dport=6081)
 bind_layers(GENEVE, Ether, proto=0x6558)
