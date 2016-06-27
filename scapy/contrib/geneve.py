@@ -22,5 +22,16 @@ class GENEVE(Packet):
     def mysummary(self):
         return self.sprintf("GENEVE (vni=%GENEVE.vni%)")
 
+    def guess_payload_class(self, payload):
+        if int(self.optionlen) > 0:
+            if ord(payload[0]) == 0 and ord(payload[1]) == 0xAB:
+                int_type = ord(payload[2])
+                if int_type == 1 or int_type == 2:
+                    return GENEVE_INT
+                elif int_type == 3:
+                    return GENEVE_INT_PLT
+
+        return Packet.guess_payload_class(self, payload)
+
 bind_layers(UDP, GENEVE, dport=6081)
-bind_layers(GENEVE, Ether)
+bind_layers(GENEVE, Ether, proto=0x6558)
