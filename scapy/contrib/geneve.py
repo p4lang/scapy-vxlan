@@ -24,7 +24,7 @@ class GENEVE(Packet):
 
     def guess_payload_class(self, payload):
         if int(self.optionlen) > 0:
-            if ord(payload[0]) == 0 and ord(payload[1]) == 0xAB:
+            if ord(payload[0]) == 0x01 and ord(payload[1]) == 0x03:
                 int_type = ord(payload[2])
                 if int_type == 1 or int_type == 2:
                     return GENEVE_INT
