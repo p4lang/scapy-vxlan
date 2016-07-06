@@ -32,7 +32,7 @@ bind_layers(INT_PLT_HDR, VXLAN_GPE_INT)
 
 class GENEVE_INT_PLT(Packet):
     name = "GENEVE_INT_PLT_header"
-    fields_desc = [ XShortField("int_opt", 0x00AB),
+    fields_desc = [ XShortField("int_opt", 0x0103),
                     XByteField("int_type", 0x03),
                     BitField("rsvd", 0 , 3),
                     BitField("length", 2, 5)]
@@ -46,7 +46,7 @@ bind_layers(GENEVE_INT_PLT, INT_PLT_HDR_GENEVE)
 
 class GENEVE_INT(Packet):
     name = "GENEVE_INT_header"
-    fields_desc = [ XShortField("int_opt", 0x00AB),
+    fields_desc = [ XShortField("int_opt", 0x0103),
                     XByteField("int_type", 0x01),
                     BitField("rsvd", 0 , 3),
                     BitField("length", 2, 5)]
