@@ -33,5 +33,13 @@ class ERSPAN_III(Packet):
                     XIntField("timestamp", 0x00000000),
                     XIntField("sgt_other", 0x00000000)]
 
+class PlatformSpecific(Packet):
+    name = "PlatformSpecific"
+    fields_desc = [ BitField("platf_id", 0, 6),
+                    BitField("info1", 0 ,26),
+                    XIntField("info2", 0x00000000)]
+
 bind_layers(GRE, ERSPAN_III, proto=0x22eb)
 bind_layers(ERSPAN_III, Ether, sgt_other=0)
+bind_layers(ERSPAN_III, PlatformSpecific, sgt_other=1)
+bind_layers(PlatformSpecific, Ether)
