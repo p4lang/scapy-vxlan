@@ -8,7 +8,6 @@ from scapy.fields import *
 from scapy.all import * # Otherwise failing at the UDP reference below
 
 ERSPAN_INT_SESSION_ID = 0x10
-ERSPAN_MOD_SESSION_ID = 0x11
 
 class VXLAN_GPE_INT_PLT(Packet):
     name = "VXLAN_GPE_INT_PLT_header"
