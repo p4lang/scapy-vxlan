@@ -7,6 +7,9 @@ from scapy.packet import *
 from scapy.fields import *
 from scapy.all import * # Otherwise failing at the UDP reference below
 
+ERSPAN_INT_SESSION_ID = 0x10
+ERSPAN_MOD_SESSION_ID = 0x11
+
 class VXLAN_GPE_INT_PLT(Packet):
     name = "VXLAN_GPE_INT_PLT_header"
     fields_desc = [ XByteField("int_type", 0x03),
@@ -64,9 +67,7 @@ class INT_META_HDR(Packet):
                     ShortField("rsvd2", 0x0000)]
 
 bind_layers(VXLAN_GPE_INT, INT_META_HDR)
-bind_layers(ERSPAN_III, INT_META_HDR, sgt_other=0x4000)  # this for the INT upstream report from sink
-bind_layers(ERSPAN_III, INT_META_HDR, sgt_other=0x4008)  # this for the INT last-hop report from sink
-bind_layers(ERSPAN_III, INT_META_HDR, sgt_other=0x4408)  # this for the INT last-hop report from 1-hop sink, which is INT src and sink at the same time for local traffic
+bind_layers(ERSPAN_III, INT_META_HDR, span_id=ERSPAN_INT_SESSION_ID)  # this for the INT report from sink
 # Add binding to GENEVE
 bind_layers(GENEVE_INT, INT_META_HDR)
 
