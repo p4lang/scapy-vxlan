@@ -31,17 +31,6 @@ class VXLAN_GPE(Packet):
 
     def mysummary(self):
         return self.sprintf("VXLAN_GPE (vni=%VXLAN_GPE.vni%)")
-    
-    def guess_payload_class(self, payload):                                                                                           
-        if self.next_proto == 0x5:
-            # VXLAN_GPE_INT or INT_PLT
-            int_type = ord(payload[0])
-            if int_type == 1 or int_type == 2:
-                return VXLAN_GPE_INT
-            elif int_type == 3:
-                return VXLAN_GPE_INT_PLT
-        else:
-            return Packet.guess_payload_class(self, payload)
  
 bind_layers(UDP, VXLAN_GPE, dport=4790)
 bind_layers(VXLAN_GPE, Ether, next_proto=3)
