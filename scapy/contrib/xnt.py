@@ -35,5 +35,4 @@ class INT_META_HDR(Packet):
 # INT data header
 class INT_hop_info(Packet):
     name = "INT_hop_info"
-    fields_desc = [ BitField("bos", 0, 1),
-                    XBitField("val", 0x7FFFFFFF, 31) ]
+    fields_desc = [ XBitField("val", 0xFFFFFFFF, 32) ]
