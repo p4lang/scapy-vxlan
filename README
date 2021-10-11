@@ -1,3 +1,6 @@
+THIS REPOSITORY IS DEPRECATED AND IS NO LONGER MAINTAINED. P4LANG SOFTWARE NOW
+USES UPSTREAM SCAPY, WHICH SUPPORTS VXLAN, GENEVE, ETC.
+
 Barefoot modified scapy, which supports VXLAN. Waiting for VXLAN support to be
 added to the main scapy repo.
 This modified repo now also supports a ERSPAN-like header.
